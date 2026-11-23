@@ -144,10 +144,76 @@ opts=$(grep -E '^-Dapp\.(displayName|fsname|version|revision|repositoryUrl)=' "$
 ver=$(grep -oP '^-Dapp\.version=\K[0-9.]+$' "$w/exe.txt") || die "no app version in $exe"
 rm -r "$opt/bin"
 
+# The app's "Native desktop notifications" (Settings > Advanced) are Windows toasts, which the helper below shows
+# with notify-send. Make them the default, in place of the app's own popup windows, and have the settings that
+# depend on them take Windows' branch on Linux, where they throw "We don't know yet".
+python3 -I - "$app" <<'EOF' || echo "Couldn't make native notifications the default; the app keeps its own popups." >&2
+import os, re, struct, sys, zipfile
+def only_a_string(b, text):  # the class's constant `text` is used only as a string literal
+    n, p, i, found, refs = struct.unpack('>H', b[8:10])[0], 10, 1, [], []
+    while i < n:
+        t = b[p]
+        if t == 1:
+            l = struct.unpack('>H', b[p+1:p+3])[0]
+            if b[p+3:p+3+l] == text: found.append(i)
+            p += 3 + l
+        else:
+            l = {3: 4, 4: 4, 5: 8, 6: 8, 7: 2, 8: 2, 9: 4, 10: 4, 11: 4, 12: 4, 15: 3, 16: 2, 17: 4, 18: 4, 19: 2, 20: 2}[t]
+            if t in (7, 12, 16, 19, 20): refs += struct.unpack('>%dH' % (l // 2), b[p+1:p+1+l])  # names, types
+            p += 1 + l; i += t in (5, 6)
+        i += 1
+    return len(found) == 1 and found[0] not in refs
+edits = [  # jar, class, bytes, replacement, count
+    # getExperience()'s default: localStore.getString("windows_events_experience", "BuiltIn")
+    ('events-desktop.jar', 'org/hicham/salaat/events/DesktopEventsExperienceHelper.class',
+     rb'\x01\x00\x07BuiltIn', b'\x01\x00\x06Native', 1),
+    # supportsCustomTones/Adhan: isWindows(); ifeq THROW; iconst_0; goto  ->  isWindows(); pop; nop; nop; iconst_0; goto
+    ('settings-desktop.jar', 'org/hicham/salaat/ui/settings/util/PlatformExts_desktopKt.class',
+     rb'(\xb8..)\x99\x00\x07(\x03\xa7)', b'\\1\x57\x00\x00\\2', 2),
+]
+new = {}
+for jar, cls, old, rep, count in edits:
+    b = zipfile.ZipFile(f'{sys.argv[1]}/{jar}').read(cls)
+    new[jar], k = re.subn(old, rep, b, flags=re.S)
+    assert k == count and (rep != b'\x01\x00\x06Native' or only_a_string(b, b'BuiltIn')), f'{cls} has changed'
+for jar, cls, *_ in edits:
+    path = f'{sys.argv[1]}/{jar}'
+    with zipfile.ZipFile(path) as src, zipfile.ZipFile(path + '.tmp', 'w') as dst:
+        for i in src.infolist(): dst.writestr(i, new[jar] if i.filename == cls else src.read(i))
+    os.replace(path + '.tmp', path)
+EOF
+
 # The app runs this Windows helper to update its live tile, every 5 minutes and when the times change.
 # On Linux it saves the day's times, in the app's language and numerals, for the panel widgets instead.
 cat > "$app/salaat-first-helper" <<'EOF'
 #!/bin/sh
+# With native notifications, the app also schedules its toasts here, and cancels them before re-scheduling:
+#   notifications schedule --id ID --time ISO-8601 --title T --body B --launch-arg ARG
+#     [--sound ms-appx:///app/Adhans//NAME.mp3 --toast-scenario Reminder --alert-action STOP-LABEL:dismiss]
+#   notifications cancel --id ID | notifications cancel-all
+# Each toast gets a user timer that shows it with notify-send. A click opens the app with ARG, like a toast's.
+if [ "${1:-}" = notifications ]; then
+  self=$(readlink -f "$0") u=salaat-first-notification cmd=$2; shift 2
+  for a; do case ${p:-} in --id) id=$a ;; --time) t=$a ;; --title) title=$a ;; --body) body=$a ;; --launch-arg) arg=$a ;;
+    --sound) sound=$a ;; --toast-scenario) urgency=critical ;; --alert-action) stop=${a%:*} ;; esac; p=$a; done
+  case $cmd in
+    cancel-all) exec systemctl --user stop "$u-*.timer" ;;
+    cancel) exec systemctl --user stop "$u-$id-*.timer" ;;
+    schedule) exec systemd-run --user --quiet --collect --unit="$u-$id-$(date +%s%N)" \
+      --on-calendar="$(date -u -d "$t" '+%F %T UTC')" --timer-property=AccuracySec=1s --timer-property=RemainAfterElapse=no \
+      -- "$self" notifications show "$@" ;;
+    show) here=${self%/*}
+      # The adhan plays until it ends or the notification is closed; other toasts get the desktop's sound.
+      if [ -n "${sound:-}" ]; then
+        "$(command -v pw-play || echo paplay)" "$here/Adhans/${sound##*/}" & player=$! hint=boolean:suppress-sound:true
+      else hint=string:sound-name:message-new-instant; fi
+      a=$(notify-send -w -a "Salaat First" -i salaat-first -h string:desktop-entry:salaat-first -h "$hint" \
+        -u "${urgency:-normal}" -A default=Open ${stop:+-A "stop=$stop"} -- "$title" "$body")
+      [ -z "${player:-}" ] || kill "$player" 2>/dev/null
+      [ "$a" != default ] || exec "$here/../salaat-first" "$arg" ;;
+  esac
+  exit
+fi
 # Called as: --language L update-tile --location NAME --times FAJR SUNRISE DHUHR ASR MAGHRIB ISHAA --next-prayer ID
 lang=en; [ "${1:-}" = --language ] && lang=$2
 while [ $# -gt 0 ] && [ "$1" != --times ]; do shift; done
@@ -244,12 +310,13 @@ ln -s ../../opt/salaat-first/salaat-first "$w/root/usr/bin/salaat-first"
 chmod -R u+w,go-w,a+rX "$w/root"
 
 desc="Prayer times (unofficial Linux port of the Salaat First Windows app)"
-# shortcut: no library dependencies are declared; the bundled JRE and Skia need X11, OpenGL,
-# fontconfig and ALSA, which every desktop install has. Declare them if minimal installs matter.
+# Only notify-send is declared, as minimal desktops can lack it.
+# shortcut: the bundled JRE and Skia need X11, OpenGL, fontconfig and ALSA, and the adhan pw-play or paplay,
+# which every desktop install has. Declare them if minimal installs matter.
 case $fmt in
 deb)
   mkdir "$w/root/DEBIAN"
-  printf 'Package: salaat-first\nVersion: %s\nArchitecture: amd64\nMaintainer: Salaat First Linux port <noreply@localhost>\nDescription: %s\n' \
+  printf 'Package: salaat-first\nVersion: %s\nArchitecture: amd64\nDepends: libnotify-bin\nMaintainer: Salaat First Linux port <noreply@localhost>\nDescription: %s\n' \
     "$ver" "$desc" > "$w/root/DEBIAN/control"
   out=$outdir/salaat-first_${ver}_amd64.deb
   dpkg-deb --root-owner-group -Zgzip --build "$w/root" "$out" >/dev/null ;;
@@ -261,6 +328,7 @@ Release: 1
 Summary: $desc
 License: Proprietary
 AutoReqProv: no
+Requires: /usr/bin/notify-send
 %global debug_package %{nil}
 %global source_date_epoch_from_changelog 0
 %global __os_install_post %{nil}
@@ -290,10 +358,12 @@ pkgrel=1
 pkgdesc="$desc"
 arch=(x86_64)
 license=(custom)
+depends=(libnotify)
 options=(!strip !debug)
 package() { cp -a "$w/root/." "\$pkgdir/"; }
 EOF
-  (cd "$w/arch" && PKGDEST=$outdir PKGEXT=.pkg.tar.zst makepkg -f >/dev/null)
+  # -d: the dependencies are for installing, not building.
+  (cd "$w/arch" && PKGDEST=$outdir PKGEXT=.pkg.tar.zst makepkg -fd >/dev/null)
   out=$outdir/salaat-first-$ver-1-x86_64.pkg.tar.zst ;;
 appimage)
   # AppDir: the app at its root, run through AppRun, with the desktop file and icon beside it.

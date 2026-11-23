@@ -71,6 +71,12 @@ The widget follows the app's language (English, Arabic, French or Spanish) and, 
 
 The widget gets the day's times from the app, which saves them every 5 minutes, so it shows `…` until the app has run once. On KDE the app may also put its own icon in the system tray, but in our tests that icon didn't respond to clicks, so use the widget instead.
 
+### Notifications
+
+Prayer notifications are your desktop's own notifications. The app calls this **Native desktop notifications**, a setting under **Settings** > **Advanced**, and this port turns it on by default. The adhan notification stays on screen and plays the adhan until you click **Stop** or close the notification. Clicking a notification opens the app.
+
+As on Windows, native notifications only play the adhans that come with the app, not your own sound files. To get the app's own notification popups back, turn off **Native desktop notifications**.
+
 ## Updates
 
 Updates come in with your normal system updates.
@@ -145,7 +151,7 @@ Your settings and data stay in `~/.config/SalaatFirst`, `~/.local/share/SalaatFi
 
 ## For developers
 
-- `port.sh` builds the packages and sets up the repository. Its header lists every option.
+- `port.sh` builds the packages and sets up the repository. Its header lists every option. It also patches two classes in the app's jars: one makes native notifications the default, and the other makes the custom-tone and adhan settings take their Windows code path. If a release changes those classes, the build skips the patch and the app keeps its own popups.
 - `msix-fetch.py` downloads the app and checks its signature. It reuses the blocks a previous build already has.
 - `widgets/` holds the GNOME extension and the KDE widget.
 - `test/e2e.sh deb|rpm|pacman` tests installing and updating in a container. It needs rootless podman.

@@ -34,7 +34,8 @@ PlasmoidItem {
     Plasmoid.contextualActions: [
         // a running app only shows its window again
         PlasmaCore.Action { text: "Open Salaat First"; icon.name: "salaat-first"; onTriggered: shell.connectSource("salaat-first >/dev/null 2>&1 &") },
-        PlasmaCore.Action { text: "Quit Salaat First"; icon.name: "application-exit"; onTriggered: shell.connectSource("pkill -f org.hicham.salaat.MainKt") },
+        // and its native notifications' timers, which outlive it
+        PlasmaCore.Action { text: "Quit Salaat First"; icon.name: "application-exit"; onTriggered: shell.connectSource("pkill -f org.hicham.salaat.MainKt; systemctl --user stop 'salaat-first-notification-*.timer'") },
         PlasmaCore.Action { text: "Two lines"; checkable: true; checked: root.twoLines; onTriggered: Plasmoid.configuration.twoLines = checked }
     ]
 

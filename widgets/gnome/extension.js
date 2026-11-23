@@ -49,7 +49,9 @@ export default class SalaatFirst extends Extension {
         const menu = this._button.menu;
         // a running app only shows its window again
         menu.addAction('Open Salaat First', () => Shell.AppSystem.get_default().lookup_app('salaat-first.desktop')?.open_new_window(-1));
-        menu.addAction('Quit Salaat First', () => Gio.Subprocess.new(['pkill', '-f', 'org.hicham.salaat.MainKt'], Gio.SubprocessFlags.NONE));
+        // and its native notifications' timers, which outlive it
+        menu.addAction('Quit Salaat First', () => Gio.Subprocess.new(['sh', '-c',
+            'pkill -f org.hicham.salaat.MainKt; systemctl --user stop "salaat-first-notification-*.timer"'], Gio.SubprocessFlags.NONE));
         menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         let two = false;
         try {
