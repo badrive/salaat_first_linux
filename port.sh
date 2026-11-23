@@ -13,7 +13,6 @@
 # The packages start the app hidden at login and ship a panel widget with the countdown and an
 # Open/Quit menu. To show it, log out and back in, then run `gnome-extensions enable salaat-first@local`
 # (GNOME), or add "Salaat First" with "Add Widgets…" (KDE Plasma 6).
-# shortcut: x86_64 only; for arm64, take the bundle's arm64 MSIX and the *arm64* artifacts below.
 set -eu
 fmt= outdir=. src= repo= setup= here=$(dirname "$0")
 while getopts f:o:r:ih opt; do case $opt in
@@ -21,7 +20,13 @@ while getopts f:o:r:ih opt; do case $opt in
   *) sed -n '5,12p' "$0"; exit 2 ;; esac; done
 shift $((OPTIND - 1)); src=${1:-}
 die() { echo "$*" >&2; exit 1; }
-[ "$(uname -m)" = x86_64 ] || die "only x86_64 is supported"
+# This architecture's names at Debian, Adoptium, Skiko and LWJGL, and its AppImage runtime's checksum.
+m=$(uname -m)
+case $m in
+  x86_64) deb=amd64 jdk=x64 skiko=linux-x64 lwjgl=natives-linux rt=2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d ;;
+  aarch64) deb=arm64 jdk=aarch64 skiko=linux-arm64 lwjgl=natives-linux-arm64 rt=00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444 ;;
+  *) die "only x86_64 and aarch64 are supported" ;;
+esac
 [ -z "$src" ] || [ -f "$src" ] || die "no such file: $src"
 
 if [ -z "$fmt" ]; then
@@ -130,6 +135,7 @@ if [ -z "$src" ]; then
 fi
 
 # Takes the x64 MSIX's app files and checks Microsoft's signature on them (the Store CDN is plain HTTP).
+# ARM builds use it too: the arm64 MSIX differs only in Windows libraries, which are dropped or replaced below.
 # Only blocks missing from the repository's last build are downloaded.
 python3 -I "$here/msix-fetch.py" "$src" "${repo:+$repo/msix}" "$w/msix" || die "couldn't get Salaat First from $src"
 opt=$w/root/opt/salaat-first app=$w/root/opt/salaat-first/app
@@ -139,7 +145,8 @@ exe=$(ls "$opt"/bin/*.exe)
 # The Windows launcher embeds the classpath (in load order) and the app's -D options.
 tr -c '[:print:]' '\n' < "$exe" > "$w/exe.txt"
 grep -oP '^-Djava.class.path=\K.*' "$w/exe.txt" | tr ';' '\n' | sed 's/^&&\\//' | grep . \
-  | grep -v -- '-runtime-windows-' | sed 's/-natives-windows\.jar$/-natives-linux.jar/' > "$opt/classpath.txt"
+  | grep -v -- '-runtime-windows-' | sed "s/^skiko-awt-runtime-linux-x64-/skiko-awt-runtime-$skiko-/; s/-natives-windows\.jar\$/-$lwjgl.jar/" \
+  > "$opt/classpath.txt"
 opts=$(grep -E '^-Dapp\.(displayName|fsname|version|revision|repositoryUrl)=' "$w/exe.txt" | sort -u | sed "s/.*/  '&' \\\\/")
 ver=$(grep -oP '^-Dapp\.version=\K[0-9.]+$' "$w/exe.txt") || die "no app version in $exe"
 rm -r "$opt/bin"
@@ -261,16 +268,16 @@ maven() { # group artifact version [classifier]
 }
 while read -r j; do
   case $j in
-    skiko-awt-runtime-linux-x64-*.jar) v=${j#skiko-awt-runtime-linux-x64-}; maven org.jetbrains.skiko skiko-awt-runtime-linux-x64 "${v%.jar}" ;;
+    skiko-awt-runtime-$skiko-*.jar) v=${j#skiko-awt-runtime-"$skiko"-}; maven org.jetbrains.skiko "skiko-awt-runtime-$skiko" "${v%.jar}" ;;
     sqlite-jdbc-*.jar) v=${j#sqlite-jdbc-}; maven org.xerial sqlite-jdbc "${v%.jar}" ;;
     jna-[0-9]*.jar) v=${j#jna-}; maven net.java.dev.jna jna "${v%.jar}" ;;
-    lwjgl*-natives-linux.jar) a=${j%%-[0-9]*} v=${j#"$a"-}; maven org.lwjgl "$a" "${v%-natives-linux.jar}" natives-linux ;;
+    lwjgl*-$lwjgl.jar) a=${j%%-[0-9]*} v=${j#"$a"-}; maven org.lwjgl "$a" "${v%-"$lwjgl".jar}" "$lwjgl" ;;
   esac
 done < "$opt/classpath.txt"
 while read -r j; do [ -f "$app/$j" ] || die "missing from the port: $j"; done < "$opt/classpath.txt"
 
 # The Windows build bundles a Java 21 runtime; bundle the Linux one.
-jre=$(curl -sSfI https://api.adoptium.net/v3/binary/latest/21/ga/linux/x64/jre/hotspot/normal/eclipse \
+jre=$(curl -sSfI https://api.adoptium.net/v3/binary/latest/21/ga/linux/$jdk/jre/hotspot/normal/eclipse \
   | sed -n 's/^location: *//Ip' | tr -d '\r')
 get "$jre" "$w/jre.tar.gz" sha256sum "$(curl -sfL "$jre.sha256.txt" | cut -d' ' -f1)"
 mkdir "$opt/jre"; tar -xzf "$w/jre.tar.gz" --strip-components=1 -C "$opt/jre"
@@ -316,9 +323,9 @@ desc="Prayer times (unofficial Linux port of the Salaat First Windows app)"
 case $fmt in
 deb)
   mkdir "$w/root/DEBIAN"
-  printf 'Package: salaat-first\nVersion: %s\nArchitecture: amd64\nDepends: libnotify-bin\nMaintainer: Salaat First Linux port <noreply@localhost>\nDescription: %s\n' \
-    "$ver" "$desc" > "$w/root/DEBIAN/control"
-  out=$outdir/salaat-first_${ver}_amd64.deb
+  printf 'Package: salaat-first\nVersion: %s\nArchitecture: %s\nDepends: libnotify-bin\nMaintainer: Salaat First Linux port <noreply@localhost>\nDescription: %s\n' \
+    "$ver" "$deb" "$desc" > "$w/root/DEBIAN/control"
+  out=$outdir/salaat-first_${ver}_$deb.deb
   dpkg-deb --root-owner-group -Zgzip --build "$w/root" "$out" >/dev/null ;;
 rpm)
   cat > "$w/salaat-first.spec" <<EOF
@@ -346,8 +353,8 @@ cp -a "$w/root/." %{buildroot}/
 /usr/share/applications/salaat-first.desktop
 /usr/share/icons/hicolor/scalable/apps/salaat-first.svg
 EOF
-  out=$outdir/salaat-first-$ver-1.x86_64.rpm
-  rpmbuild --quiet -bb --define "_topdir $w/rpmbuild" --define "_rpmdir $outdir" \
+  out=$outdir/salaat-first-$ver-1.$m.rpm
+  rpmbuild --quiet -bb --target "$m" --define "_topdir $w/rpmbuild" --define "_rpmdir $outdir" \
     --define '_build_name_fmt %%{NAME}-%%{VERSION}-%%{RELEASE}.%%{ARCH}.rpm' "$w/salaat-first.spec" ;;
 pacman)
   mkdir "$w/arch"
@@ -356,7 +363,7 @@ pkgname=salaat-first
 pkgver=$ver
 pkgrel=1
 pkgdesc="$desc"
-arch=(x86_64)
+arch=($m)
 license=(custom)
 depends=(libnotify)
 options=(!strip !debug)
@@ -364,7 +371,7 @@ package() { cp -a "$w/root/." "\$pkgdir/"; }
 EOF
   # -d: the dependencies are for installing, not building.
   (cd "$w/arch" && PKGDEST=$outdir PKGEXT=.pkg.tar.zst makepkg -fd >/dev/null)
-  out=$outdir/salaat-first-$ver-1-x86_64.pkg.tar.zst ;;
+  out=$outdir/salaat-first-$ver-1-$m.pkg.tar.zst ;;
 appimage)
   # AppDir: the app at its root, run through AppRun, with the desktop file and icon beside it.
   # shortcut: no login entry or panel widgets, which need a system install; use a package for those.
@@ -373,9 +380,8 @@ appimage)
   cp "$w/root/usr/share/applications/salaat-first.desktop" "$w/root/usr/share/icons/hicolor/scalable/apps/salaat-first.svg" "$a/"
   ln -s salaat-first.svg "$a/.DirIcon"
   mksquashfs "$a" "$w/app.squashfs" -root-owned -noappend -comp zstd -no-progress >/dev/null
-  get https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64 "$w/runtime" \
-    sha256sum 2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
-  out=$outdir/Salaat_First-$ver-x86_64.AppImage
+  get https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-$m "$w/runtime" sha256sum "$rt"
+  out=$outdir/Salaat_First-$ver-$m.AppImage
   cat "$w/runtime" "$w/app.squashfs" > "$out"; chmod +x "$out" ;;
 esac
 echo "Built $out"

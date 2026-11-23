@@ -12,7 +12,7 @@ This project is not affiliated with the developer of Salaat First. The packages 
 
 ## What you need
 
-- A 64-bit Intel or AMD computer (x86_64). ARM is not supported.
+- A 64-bit Intel or AMD computer (x86_64), or a 64-bit ARM one (aarch64). ARM builds have only been tested in an emulator.
 - Debian, Ubuntu, Fedora or Arch Linux, or a distribution based on one of them. Other distributions can use the AppImage (see [Without automatic updates](#without-automatic-updates)).
 - About 1 GB of free space in `/var/tmp` while it builds.
 
