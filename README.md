@@ -28,6 +28,11 @@ Install the tools the script uses:
 
 ## Install
 
+You can install Salaat First in two ways:
+
+- **With sudo**, as below: for every user of the computer. Updates come in through your package manager.
+- **[Without sudo](#without-sudo)**: just for you, in your home folder, for example on a school or work computer. You update it by hand.
+
 ```sh
 git clone https://github.com/sickl8/salaat_first_linux.git
 cd salaat_first_linux
@@ -120,6 +125,47 @@ To build a package file and install it yourself, run the script without `-i` (an
 
 Install the file with `sudo apt install ./salaat-first_*.deb`, `sudo dnf install ./salaat-first-*.rpm` or `sudo pacman -U salaat-first-*.pkg.tar.zst`. To update, run the script again and install the new file. The AppImage doesn't include the panel widget and doesn't start at login.
 
+## Without sudo
+
+If you can't use sudo, install Salaat First in your home folder. You get the app, the panel widget, the notifications and the start at login, for your account only. It takes about 300 MB, and it doesn't update by itself: to update, do these steps again.
+
+First, build it. On Debian or Ubuntu with `git`, `curl`, `python3` and `openssl` installed:
+
+```sh
+git clone https://github.com/sickl8/salaat_first_linux.git && cd salaat_first_linux
+./port.sh -f deb -o /tmp/sf
+r=$(mktemp -d) && dpkg-deb -x /tmp/sf/salaat-first_*.deb "$r" && rm -r /tmp/sf
+```
+
+Or, on any distribution, build it in Docker, which brings its own tools:
+
+```sh
+git clone https://github.com/sickl8/salaat_first_linux.git && cd salaat_first_linux
+r=$(mktemp -d) && docker run --rm -v "$PWD:/src:ro" debian:trixie sh -c 'apt-get update -qq &&
+  apt-get install -y -qq curl ca-certificates python3 openssl >/dev/null && /src/port.sh -f deb -o /out >&2 &&
+  dpkg-deb --fsys-tarfile /out/*.deb' | tar -x -C "$r"
+```
+
+To use a file you downloaded by hand (see [If the download fails](#if-the-download-fails)), add its path at the end of the `port.sh` command. With Docker, put the file in the `salaat_first_linux` folder and add `/src/` followed by its name.
+
+Then, in the same terminal, install it in your home folder:
+
+```sh
+mkdir -p ~/.local/opt ~/.local/bin ~/.local/share/applications ~/.local/share/icons/hicolor/scalable/apps \
+  ~/.config/autostart ~/.local/share/gnome-shell/extensions ~/.local/share/plasma/plasmoids
+test -d "$r/opt/salaat-first" && rm -rf ~/.local/opt/salaat-first && mv "$r/opt/salaat-first" ~/.local/opt/
+ln -sf ~/.local/opt/salaat-first/salaat-first ~/.local/bin/salaat-first
+# ~/.local/bin may not be on the desktop's PATH, so the menu and login entries get the full path.
+sed "s|^Exec=salaat-first|Exec=$HOME/.local/bin/salaat-first|" "$r/usr/share/applications/salaat-first.desktop" > ~/.local/share/applications/salaat-first.desktop
+sed "s|^Exec=salaat-first|Exec=$HOME/.local/bin/salaat-first|" "$r/etc/xdg/autostart/salaat-first.desktop" > ~/.config/autostart/salaat-first.desktop
+cp "$r/usr/share/icons/hicolor/scalable/apps/salaat-first.svg" ~/.local/share/icons/hicolor/scalable/apps/
+cp -rT widgets/gnome ~/.local/share/gnome-shell/extensions/salaat-first@local
+cp -rT widgets/kde ~/.local/share/plasma/plasmoids/local.salaatfirst
+rm -rf "$r"
+```
+
+Then turn on the [panel widget](#the-panel-widget). On KDE, the widget's **Open Salaat First** needs `~/.local/bin` in your PATH, which Debian and Ubuntu add when you log in.
+
 ## Is the download safe?
 
 The Microsoft Store serves its files over plain HTTP. Before using anything it downloads, the script checks Microsoft's signature on the package against Microsoft's root certificate. The signature covers every file of the app, and it must belong to Salaat First's publisher. A changed or corrupted download stops the build. store.rg-adguard.net only provides the download link, so the script doesn't need to trust it.
@@ -148,6 +194,14 @@ sudo userdel salaat-first
 ```
 
 On Arch, also delete the `[salaat-first]` section at the end of `/etc/pacman.conf`.
+
+If you installed without sudo, remove it with:
+
+```sh
+rm -rf ~/.local/opt/salaat-first ~/.local/bin/salaat-first ~/.local/share/applications/salaat-first.desktop \
+  ~/.config/autostart/salaat-first.desktop ~/.local/share/icons/hicolor/scalable/apps/salaat-first.svg \
+  ~/.local/share/gnome-shell/extensions/salaat-first@local ~/.local/share/plasma/plasmoids/local.salaatfirst
+```
 
 Your settings and data stay in `~/.config/SalaatFirst`, `~/.local/share/SalaatFirst` and `~/.cache/SalaatFirst`. Delete those too for a clean removal.
 
