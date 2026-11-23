@@ -1,10 +1,12 @@
 # Salaat First for Linux
 
+[![Support this port on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/sickl8)
+
 An unofficial way to run the [Salaat First](https://apps.microsoft.com/detail/9pksnkt5dfsp) prayer times app on Linux.
 
 The Windows version of Salaat First is a Java app, so it can run on Linux too. `port.sh` downloads that release from the Microsoft Store and builds a normal package for your distribution. It adds the Linux libraries the app needs, a Java runtime and a panel widget. This repository contains no part of the app itself; everything is downloaded and built on your own computer.
 
-This project is not affiliated with the developer of Salaat First. The packages you build contain the app, so please don't share them.
+This project is not affiliated with the developer of Salaat First, so support on Ko-fi goes to this port, not to the app's developer. The packages you build contain the app, so please don't share them.
 
 ![Salaat First on GNOME, with the countdown to the next prayer in the top bar](docs/gnome.png)
 
