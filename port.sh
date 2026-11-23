@@ -4,20 +4,23 @@
 # from them, and bundle a Linux JRE.
 # Usage: port.sh [-f deb|rpm|pacman|appimage] [-o OUTDIR] [MSIXBUNDLE_OR_MSIX]
 #        sudo port.sh -i [-f deb|rpm|pacman] [MSIXBUNDLE_OR_MSIX]
+#        port.sh -u [MSIXBUNDLE_OR_MSIX]
 #   No file: downloads the latest release from the Microsoft Store (via store.rg-adguard.net).
 #   No -f: builds the format your distro installs, or an AppImage if it's not recognised.
 #   -i: adds a local repository that your package manager updates Salaat First from. A daily job
 #       (salaat-first-update.timer) builds each new release into /var/lib/salaat-first/repo and
 #       downloads only the 64 KB blocks that changed. A file given here seeds the first download.
 #   -r DIR: what that job runs: builds into the repository in DIR, unless it has the latest release.
+#   -u: installs it in your home folder, for you only and without sudo. Run it again to update. If curl,
+#       python3 or openssl is missing, it builds in Docker.
 # The packages start the app hidden at login and ship a panel widget with the countdown and an
 # Open/Quit menu. To show it, log out and back in, then run `gnome-extensions enable salaat-first@local`
 # (GNOME), or add "Salaat First" with "Add Widgets…" (KDE Plasma 6).
 set -eu
 fmt= outdir=. src= repo= setup= here=$(dirname "$0")
-while getopts f:o:r:ih opt; do case $opt in
-  f) fmt=$OPTARG ;; o) outdir=$OPTARG ;; r) repo=$OPTARG outdir=$OPTARG/repo ;; i) setup=1 ;;
-  *) sed -n '5,12p' "$0"; exit 2 ;; esac; done
+while getopts f:o:r:iuh opt; do case $opt in
+  f) fmt=$OPTARG ;; o) outdir=$OPTARG ;; r) repo=$OPTARG outdir=$OPTARG/repo ;; i) setup=1 ;; u) fmt=home ;;
+  *) sed -n '5,15p' "$0"; exit 2 ;; esac; done
 shift $((OPTIND - 1)); src=${1:-}
 die() { echo "$*" >&2; exit 1; }
 # This architecture's names at Debian, Adoptium, Skiko and LWJGL, and its AppImage runtime's checksum.
@@ -40,12 +43,18 @@ if [ -z "$fmt" ]; then
   echo "Building a $fmt package (pick another with -f)."
 fi
 need() { command -v "$1" >/dev/null || die "$1 not found: install $2"; }
-need curl curl; need python3 "python3 (Arch: python)"; need openssl openssl
+docker=
+# Without sudo, a computer that lacks these can still build in Docker.
+[ "$fmt" != home ] || for t in curl python3 openssl; do command -v $t >/dev/null || docker=1; done
+if [ -n "$docker" ]; then need docker "curl, python3 and openssl, or Docker"
+else need curl curl; need python3 "python3 (Arch: python)"; need openssl openssl; fi
 case $fmt in
   deb) need dpkg-deb dpkg ;;
   rpm) need rpmbuild "rpm-build (Debian/Ubuntu: rpm)"; [ -z "$setup$repo" ] || need createrepo_c createrepo_c ;;
   pacman) need makepkg pacman; need fakeroot base-devel ;;
   appimage) need mksquashfs squashfs-tools; [ -z "$setup$repo" ] || die "the repository needs deb, rpm or pacman" ;;
+  home) [ "$(id -u)" != 0 ] || die "-u installs for you only; run it without sudo"
+    [ -z "$setup$repo" ] || die "the repository needs deb, rpm or pacman" ;;
   *) die "unknown format: $fmt (use deb, rpm, pacman or appimage)" ;;
 esac
 
@@ -117,6 +126,32 @@ get() { # url file sum-command expected-sum
   [ -z "$repo" ] || cp "$2" "$w/cache/"
 }
 [ -z "$repo" ] || mkdir "$w/cache"
+
+# -u: puts the built files in your home folder: the app in ~/.local/opt, and its menu and login entries,
+# icon and widgets where your desktop looks for them.
+install_home() {
+  [ -d "$w/root/opt/salaat-first" ] || die "the build failed"
+  l=$HOME/.local d=${XDG_DATA_HOME:-$HOME/.local/share} a=${XDG_CONFIG_HOME:-$HOME/.config}/autostart
+  rm -rf "$l/opt/salaat-first" "$d/gnome-shell/extensions/salaat-first@local" "$d/plasma/plasmoids/local.salaatfirst"
+  mkdir -p "$l/opt" "$l/bin" "$d" "$a"
+  mv "$w/root/opt/salaat-first" "$l/opt/"; ln -sf ../opt/salaat-first/salaat-first "$l/bin/salaat-first"
+  cp -r "$w/root/usr/share/." "$d/"
+  # ~/.local/bin may not be on the desktop's PATH, so the menu and login entries get the full path.
+  sed -i "s|^Exec=salaat-first|Exec=$l/bin/salaat-first|" "$d/applications/salaat-first.desktop"
+  sed "s|^Exec=salaat-first|Exec=$l/bin/salaat-first|" "$w/root/etc/xdg/autostart/salaat-first.desktop" > "$a/salaat-first.desktop"
+  echo "Installed in $l/opt/salaat-first. To show the panel widget, log out and back in (see README.md)."
+  exit
+}
+if [ -n "$docker" ]; then
+  echo "curl, python3 or openssl is missing, so building in Docker"
+  mkdir "$w/root"
+  # The files come out as a tar, so none of them belong to Docker's root.
+  docker run --rm -v "$(cd "$here" && pwd):/src:ro" ${src:+-v "$(readlink -f "$src"):/in:ro"} debian:trixie sh -c \
+    "apt-get update -qq && apt-get install -y -qq curl ca-certificates python3 openssl >/dev/null &&
+     /src/port.sh -f deb -o /out ${src:+/in} >&2 && dpkg-deb --fsys-tarfile /out/*.deb" \
+    | tar -x -C "$w/root" || die "the build in Docker failed"
+  install_home
+fi
 
 if [ -z "$src" ]; then
   echo "Looking up the latest release"
@@ -321,6 +356,7 @@ desc="Prayer times (unofficial Linux port of the Salaat First Windows app)"
 # shortcut: the bundled JRE and Skia need X11, OpenGL, fontconfig and ALSA, and the adhan pw-play or paplay,
 # which every desktop install has. Declare them if minimal installs matter.
 case $fmt in
+home) install_home ;;
 deb)
   mkdir "$w/root/DEBIAN"
   printf 'Package: salaat-first\nVersion: %s\nArchitecture: %s\nDepends: libnotify-bin\nMaintainer: Salaat First Linux port <noreply@localhost>\nDescription: %s\n' \

@@ -15,7 +15,7 @@ This project is not affiliated with the developer of Salaat First, so support on
 ## What you need
 
 - A 64-bit Intel or AMD computer (x86_64), or a 64-bit ARM one (aarch64). ARM builds have only been tested in an emulator.
-- Debian, Ubuntu, Fedora or Arch Linux, or a distribution based on one of them. Other distributions can use the AppImage (see [Without automatic updates](#without-automatic-updates)).
+- Debian, Ubuntu, Fedora or Arch Linux, or a distribution based on one of them. Other distributions can [install without sudo](#without-sudo) or use the AppImage (see [Without automatic updates](#without-automatic-updates)).
 - About 1 GB of free space in `/var/tmp` while it builds.
 
 Install the tools the script uses:
@@ -127,44 +127,19 @@ Install the file with `sudo apt install ./salaat-first_*.deb`, `sudo dnf install
 
 ## Without sudo
 
-If you can't use sudo, install Salaat First in your home folder. You get the app, the panel widget, the notifications and the start at login, for your account only. It takes about 300 MB, and it doesn't update by itself: to update, do these steps again.
-
-First, build it. On Debian or Ubuntu with `git`, `curl`, `python3` and `openssl` installed:
+If you can't use sudo, install Salaat First in your home folder. You get the app, the panel widget, the notifications and the start at login, for your account only. It takes about 300 MB.
 
 ```sh
-git clone https://github.com/sickl8/salaat_first_linux.git && cd salaat_first_linux
-./port.sh -f deb -o /tmp/sf
-r=$(mktemp -d) && dpkg-deb -x /tmp/sf/salaat-first_*.deb "$r" && rm -r /tmp/sf
-```
-
-Or, on any distribution, build it in Docker, which brings its own tools:
-
-```sh
-git clone https://github.com/sickl8/salaat_first_linux.git && cd salaat_first_linux
-r=$(mktemp -d) && docker run --rm -v "$PWD:/src:ro" debian:trixie sh -c 'apt-get update -qq &&
-  apt-get install -y -qq curl ca-certificates python3 openssl >/dev/null && /src/port.sh -f deb -o /out >&2 &&
-  dpkg-deb --fsys-tarfile /out/*.deb' | tar -x -C "$r"
-```
-
-To use a file you downloaded by hand (see [If the download fails](#if-the-download-fails)), add its path at the end of the `port.sh` command. With Docker, put the file in the `salaat_first_linux` folder and add `/src/` followed by its name.
-
-Then, in the same terminal, install it in your home folder:
-
-```sh
-mkdir -p ~/.local/opt ~/.local/bin ~/.local/share/applications ~/.local/share/icons/hicolor/scalable/apps \
-  ~/.config/autostart ~/.local/share/gnome-shell/extensions ~/.local/share/plasma/plasmoids
-test -d "$r/opt/salaat-first" && rm -rf ~/.local/opt/salaat-first && mv "$r/opt/salaat-first" ~/.local/opt/
-ln -sf ~/.local/opt/salaat-first/salaat-first ~/.local/bin/salaat-first
-# ~/.local/bin may not be on the desktop's PATH, so the menu and login entries get the full path.
-sed "s|^Exec=salaat-first|Exec=$HOME/.local/bin/salaat-first|" "$r/usr/share/applications/salaat-first.desktop" > ~/.local/share/applications/salaat-first.desktop
-sed "s|^Exec=salaat-first|Exec=$HOME/.local/bin/salaat-first|" "$r/etc/xdg/autostart/salaat-first.desktop" > ~/.config/autostart/salaat-first.desktop
-cp "$r/usr/share/icons/hicolor/scalable/apps/salaat-first.svg" ~/.local/share/icons/hicolor/scalable/apps/
-cp -rT widgets/gnome ~/.local/share/gnome-shell/extensions/salaat-first@local
-cp -rT widgets/kde ~/.local/share/plasma/plasmoids/local.salaatfirst
-rm -rf "$r"
+git clone https://github.com/sickl8/salaat_first_linux.git
+cd salaat_first_linux
+./port.sh -u
 ```
 
 Then turn on the [panel widget](#the-panel-widget). On KDE, the widget's **Open Salaat First** needs `~/.local/bin` in your PATH, which Debian and Ubuntu add when you log in.
+
+The script needs `curl`, `python3` and `openssl`. If one of them is missing and you can use Docker, it builds in Docker instead. A file you downloaded by hand (see [If the download fails](#if-the-download-fails)) goes at the end: `./port.sh -u ~/Downloads/<that file>.msixbundle`.
+
+It doesn't update by itself. To update, run `git pull` and `./port.sh -u` again in your clone.
 
 ## Is the download safe?
 
