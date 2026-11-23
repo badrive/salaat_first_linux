@@ -1,0 +1,6 @@
+{
+  "uuid": "salaat-first@local",
+  "name": "Salaat First",
+  "description": "Time since the previous prayer and until the next one, and a menu to open or quit Salaat First.",
+  "shell-version": ["45", "46", "47", "48", "49", "50", "51"]
+}

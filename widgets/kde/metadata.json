@@ -1,0 +1,12 @@
+{
+  "KPackageStructure": "Plasma/Applet",
+  "KPlugin": {
+    "Id": "local.salaatfirst",
+    "Name": "Salaat First",
+    "Description": "Time since the previous prayer and until the next one, and actions to open or quit Salaat First.",
+    "Icon": "salaat-first",
+    "Category": "Date and Time",
+    "Version": "0.2.0"
+  },
+  "X-Plasma-API-Minimum-Version": "6.0"
+}
